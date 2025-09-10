@@ -28,13 +28,30 @@ jobs:
         run: |
           echo "${{ secrets.UPSTOX_ACCESS_TOKEN }}" > token.txt
       
+      - name: Create logs directory
+        run: |
+          mkdir -p logs
+      
       - name: Run trading
         run: |
           python main.py
+        timeout-minutes: 390  # 6.5 hours (market hours)
       
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: trading-logs-${{ github.run_number }}
           path: logs/
+          retention-days: 30
+      
+      - name: Display final status
+        if: always()
+        run: |
+          echo "Trading session completed"
+          if [ -f logs/trading_*.log ]; then
+            echo "Log file found - displaying last 50 lines:"
+            tail -50 logs/trading_*.log
+          else
+            echo "No log file found"
+          fi
