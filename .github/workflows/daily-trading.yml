@@ -1,51 +1,15 @@
-name: Daily Trading Session
+name: Daily Trading
 
 on:
   schedule:
     # Run Monday to Friday at 9:20 AM IST (3:50 AM UTC)
     - cron: '50 3 * * 1-5'
-    # Token expiry check daily at 8 AM IST (2:30 AM UTC)
-    - cron: '30 2 * * *'
   
-  # Allow manual trigger
-  workflow_dispatch:
-    inputs:
-      duration_hours:
-        description: 'Session duration in hours'
-        required: false
-        default: '6'
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  check-market:
+  trading:
     runs-on: ubuntu-latest
-    outputs:
-      should_trade: ${{ steps.check.outputs.should_trade }}
-    
-    steps:
-      - name: Check if market is open
-        id: check
-        run: |
-          # Get current IST time
-          TZ='Asia/Kolkata' date
-          
-          # Check if it's a holiday (you can add holiday checking API here)
-          DAY_OF_WEEK=$(TZ='Asia/Kolkata' date +%u)
-          HOUR=$(TZ='Asia/Kolkata' date +%H)
-          
-          # Check if it's a weekday and within market hours
-          if [ $DAY_OF_WEEK -le 5 ] && [ $HOUR -ge 9 ] && [ $HOUR -lt 16 ]; then
-            echo "should_trade=true" >> $GITHUB_OUTPUT
-            echo "Market is open. Starting trading session."
-          else
-            echo "should_trade=false" >> $GITHUB_OUTPUT
-            echo "Market is closed. Skipping trading session."
-          fi
-
-  trading-session:
-    needs: check-market
-    if: needs.check-market.outputs.should_trade == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 380  # 6+ hours timeout
     
     steps:
       - name: Checkout code
@@ -55,31 +19,18 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-          cache: 'pip'
       
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install upstox-python-sdk numpy pandas scipy
       
-      - name: Create directories
+      - name: Create token file
         run: |
-          mkdir -p logs reports data
+          echo "${{ secrets.UPSTOX_ACCESS_TOKEN }}" > token.txt
       
-      - name: Set up credentials
-        env:
-          UPSTOX_API_KEY: ${{ secrets.UPSTOX_API_KEY }}
-          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+      - name: Run trading
         run: |
-          echo "Credentials configured"
-      
-      - name: Run trading session
-        env:
-          UPSTOX_API_KEY: ${{ secrets.UPSTOX_API_KEY }}
-          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
-          PYTHONUNBUFFERED: 1
-        run: |
-          python src/main.py
+          python main.py
       
       - name: Upload logs
         if: always()
@@ -87,142 +38,3 @@ jobs:
         with:
           name: trading-logs-${{ github.run_number }}
           path: logs/
-          retention-days: 30
-      
-      - name: Upload reports
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: trading-reports-${{ github.run_number }}
-          path: reports/
-          retention-days: 90
-      
-      - name: Upload session data
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: session-data-${{ github.run_number }}
-          path: data/
-          retention-days: 90
-      
-      - name: Send notification (optional)
-        if: always()
-        run: |
-          # Add your notification logic here (email, Slack, Discord, etc.)
-          echo "Trading session completed"
-
-  generate-report:
-    needs: trading-session
-    if: always() && needs.trading-session.result == 'success'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          path: artifacts/
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-      
-      - name: Install dependencies
-        run: |
-          pip install pandas matplotlib seaborn
-      
-      - name: Generate consolidated report
-        run: |
-          python scripts/generate_weekly_report.py
-      
-      - name: Commit reports to repository
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add reports/
-          git diff --staged --quiet || git commit -m "Add trading reports for run #${{ github.run_number }}"
-          git push
-
-  check-token-expiry:
-    runs-on: ubuntu-latest
-    # Run only for the 2:30 AM UTC schedule (8 AM IST)
-    if: github.event.schedule == '30 2 * * *'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Check token expiry
-        id: check_expiry
-        env:
-          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
-        run: |
-          # Decode JWT token and check expiry
-          python3 << 'EOF'
-          import os
-          import base64
-          import json
-          from datetime import datetime, timedelta
-          
-          token = os.environ.get('UPSTOX_ACCESS_TOKEN', '')
-          if not token:
-              print("No token found")
-              exit(0)
-          
-          try:
-              # JWT has 3 parts separated by dots
-              parts = token.split('.')
-              if len(parts) != 3:
-                  print("Invalid token format")
-                  exit(0)
-              
-              # Decode the payload (second part)
-              payload = parts[1]
-              # Add padding if needed
-              padding = 4 - len(payload) % 4
-              if padding != 4:
-                  payload += '=' * padding
-              
-              decoded = base64.b64decode(payload)
-              data = json.loads(decoded)
-              
-              exp_timestamp = data.get('exp', 0)
-              exp_date = datetime.fromtimestamp(exp_timestamp)
-              now = datetime.now()
-              
-              print(f"Token expires at: {exp_date}")
-              print(f"Current time: {now}")
-              
-              # Check if expires within 24 hours
-              if exp_date - now < timedelta(hours=24):
-                  print("::set-output name=expiring::true")
-                  print("TOKEN EXPIRING SOON!")
-              else:
-                  print("::set-output name=expiring::false")
-                  print("Token is still valid")
-                  
-          except Exception as e:
-              print(f"Error checking token: {e}")
-              print("::set-output name=expiring::false")
-          EOF
-      
-      - name: Create issue if token expiring
-        if: steps.check_expiry.outputs.expiring == 'true'
-        uses: actions/create-issue@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          title: "🚨 Upstox Access Token Expiring Soon"
-          body: |
-            The Upstox access token will expire within the next 24 hours.
-            
-            **Action Required:**
-            1. Log in to Upstox and generate a new access token
-            2. Update the `UPSTOX_ACCESS_TOKEN` secret in repository settings
-            3. Close this issue once updated
-            
-            Without a valid token, the daily trading sessions will fail.
-          labels: "urgent,token-refresh"
