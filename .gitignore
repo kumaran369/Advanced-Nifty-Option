@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific
+logs/
+reports/
+data/
+*.log
+*.csv
+
+# Credentials
+.env
+config.py
+*_credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Temporary files
+*.tmp
+*.bak
+.~lock.*
+
+# Generated reports
+*.html
+*.pdf
+*.png
+*.jpg
+
+# Session data
+session_*.json
+emergency_*.json
+
+# Archives
+*.zip
+*.tar.gz

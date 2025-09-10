@@ -1,0 +1,168 @@
+name: Daily Trading Session
+
+on:
+  schedule:
+    # Run Monday to Friday at 9:20 AM IST (3:50 AM UTC)
+    - cron: '50 3 * * 1-5'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      duration_hours:
+        description: 'Session duration in hours'
+        required: false
+        default: '6'
+
+jobs:
+  check-market:
+    runs-on: ubuntu-latest
+    outputs:
+      should_trade: ${{ steps.check.outputs.should_trade }}
+    
+    steps:
+      - name: Check if market is open
+        id: check
+        run: |
+          # Get current IST time
+          TZ='Asia/Kolkata' date
+          
+          # Check if it's a holiday (you can add holiday checking API here)
+          DAY_OF_WEEK=$(TZ='Asia/Kolkata' date +%u)
+          HOUR=$(TZ='Asia/Kolkata' date +%H)
+          
+          # Check if it's a weekday and within market hours
+          if [ $DAY_OF_WEEK -le 5 ] && [ $HOUR -ge 9 ] && [ $HOUR -lt 16 ]; then
+            echo "should_trade=true" >> $GITHUB_OUTPUT
+            echo "Market is open. Starting trading session."
+          else
+            echo "should_trade=false" >> $GITHUB_OUTPUT
+            echo "Market is closed. Skipping trading session."
+          fi
+
+  trading-session:
+    needs: check-market
+    if: needs.check-market.outputs.should_trade == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 380  # 6+ hours timeout
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create directories
+        run: |
+          mkdir -p logs reports data
+      
+      - name: Set up credentials
+        env:
+          UPSTOX_API_KEY: ${{ secrets.UPSTOX_API_KEY }}
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+        run: |
+          echo "Credentials configured"
+      
+      - name: Run trading session
+        env:
+          UPSTOX_API_KEY: ${{ secrets.UPSTOX_API_KEY }}
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+          PYTHONUNBUFFERED: 1
+        run: |
+          python src/main.py
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: trading-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 30
+      
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: trading-reports-${{ github.run_number }}
+          path: reports/
+          retention-days: 90
+      
+      - name: Upload session data
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: session-data-${{ github.run_number }}
+          path: data/
+          retention-days: 90
+      
+      - name: Send notification (optional)
+        if: always()
+        run: |
+          # Add your notification logic here (email, Slack, Discord, etc.)
+          echo "Trading session completed"
+
+  generate-report:
+    needs: trading-session
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Install dependencies
+        run: |
+          pip install pandas matplotlib seaborn
+      
+      - name: Generate consolidated report
+        run: |
+          python scripts/generate_weekly_report.py
+      
+      - name: Commit reports to repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add reports/
+          git diff --staged --quiet || git commit -m "Add trading reports for run #${{ github.run_number }}"
+          git push
+
+  token-refresh:
+    runs-on: ubuntu-latest
+    schedule:
+      # Run daily at 8 AM IST to check token expiry
+      - cron: '30 2 * * *'
+    
+    steps:
+      - name: Check token expiry
+        env:
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+        run: |
+          # Add token expiry checking logic
+          echo "Checking token expiry..."
+          # If token expires soon, create an issue
+      
+      - name: Create issue if token expiring
+        if: steps.check.outputs.expiring == 'true'
+        uses: actions/create-issue@v2
+        with:
+          title: "Upstox Access Token Expiring Soon"
+          body: "The Upstox access token will expire soon. Please generate a new token and update the secret."
+          labels: "urgent,token-refresh"
