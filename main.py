@@ -50,16 +50,6 @@ TIME_BASED_EXIT_HOURS = 2
 MARKET_OPEN = datetime.now().replace(hour=9, minute=15, second=0, microsecond=0)
 MARKET_CLOSE = datetime.now().replace(hour=15, minute=30, second=0, microsecond=0)
 
-# Setup simple logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f"logs/trading_{datetime.now().strftime('%Y%m%d')}.log"),
-        logging.StreamHandler()
-    ]
-)
-
 # Copy all the classes from your original file
 class BlackScholesCalculator:
     """Proper options pricing using Black-Scholes model"""
@@ -630,10 +620,24 @@ def validate_token():
     logging.info("Token loaded successfully")
     return True
 
+def setup_logging():
+    """Setup logging configuration after creating logs directory"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(message)s',
+        handlers=[
+            logging.FileHandler(f"logs/trading_{datetime.now().strftime('%Y%m%d')}.log"),
+            logging.StreamHandler()
+        ]
+    )
+
 def main():
     try:
         # Create logs directory if it doesn't exist
         os.makedirs("logs", exist_ok=True)
+        
+        # Setup logging after directory creation
+        setup_logging()
         
         # Validate token
         if not validate_token():
