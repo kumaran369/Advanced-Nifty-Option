@@ -3,9 +3,16 @@ name: Daily Trading
 on:
   schedule:
     # Run Monday to Friday at 9:20 AM IST (3:50 AM UTC)
+    # Note: GitHub Actions runs on UTC time
+    # IST = UTC + 5:30, so 9:20 AM IST = 3:50 AM UTC
     - cron: '50 3 * * 1-5'
   
   workflow_dispatch:  # Allow manual trigger
+    inputs:
+      debug_mode:
+        description: 'Run in debug mode'
+        required: false
+        default: 'false'
 
 jobs:
   trading:
@@ -35,11 +42,15 @@ jobs:
       - name: Run trading bot
         id: trading
         run: |
+          # Set IST timezone
+          export TZ='Asia/Kolkata'
+          echo "Current IST time: $(date)"
           python -u main.py
         timeout-minutes: 390  # 6.5 hours (market hours)
         env:
           GITHUB_ACTIONS: 'true'  # Ensures proper logging for CI
           PYTHONUNBUFFERED: '1'  # Force unbuffered output
+          TZ: 'Asia/Kolkata'  # Set timezone to IST
       
       - name: Generate trading report
         if: always()

@@ -775,8 +775,21 @@ def main():
         print(f"Current Time : {now.strftime('%H:%M:%S')}", flush=True)
         print(f"Market Hours : 09:15 - 15:30", flush=True)
         
+        # Allow override for testing
+        FORCE_RUN = os.environ.get('FORCE_RUN', 'false').lower() == 'true'
+        
         if now.hour < 9 or now.hour >= 16:
             print("⚠️  Outside market hours", flush=True)
+            if not FORCE_RUN and IS_GITHUB_ACTIONS:
+                print("Waiting for market hours... (Set FORCE_RUN=true to override)", flush=True)
+                # Wait until market opens
+                market_open = now.replace(hour=9, minute=15, second=0)
+                if now.hour >= 16:  # After market close, wait for next day
+                    market_open += timedelta(days=1)
+                wait_seconds = (market_open - now).total_seconds()
+                if wait_seconds > 0 and wait_seconds < 3600:  # Wait up to 1 hour
+                    print(f"Waiting {wait_seconds/60:.0f} minutes for market to open...", flush=True)
+                    time.sleep(wait_seconds)
         
         # Initialize trader
         trader = OptionsTrader()
