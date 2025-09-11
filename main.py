@@ -1,6 +1,6 @@
 """
-Nifty Option 1-lot Scalping Signal Generator - CLEAN LOGGING VERSION
-Detailed logs for trade entries only, single-line tick updates
+Nifty Option 1-lot Scalping Signal Generator - GITHUB ACTIONS VERSION
+Optimized for GitHub Actions with proper logging
 """
 
 import time
@@ -18,6 +18,9 @@ from scipy.stats import norm
 from typing import Dict, Optional, Tuple
 
 # -------- SETTINGS ----------
+# Detect if running in GitHub Actions
+IS_GITHUB_ACTIONS = os.environ.get('GITHUB_ACTIONS', 'false') == 'true'
+
 # Read token from file
 def get_token():
     token_file = "token.txt"
@@ -49,6 +52,21 @@ TIME_BASED_EXIT_HOURS = 2
 # Market Hours
 MARKET_OPEN = datetime.now().replace(hour=9, minute=15, second=0, microsecond=0)
 MARKET_CLOSE = datetime.now().replace(hour=15, minute=30, second=0, microsecond=0)
+
+# Logging configuration for GitHub Actions
+class GitHubActionsLogger:
+    def __init__(self):
+        self.last_tick_time = 0
+        self.tick_interval = 10  # Log tick updates every 10 seconds in GitHub Actions
+        
+    def should_log_tick(self):
+        current_time = time.time()
+        if current_time - self.last_tick_time >= self.tick_interval:
+            self.last_tick_time = current_time
+            return True
+        return False
+
+gh_logger = GitHubActionsLogger()
 
 class BlackScholesCalculator:
     """Proper options pricing using Black-Scholes model"""
@@ -298,7 +316,7 @@ class OptionsTrader:
             
             market_data = self._update_market_data(price, volume, timestamp)
             
-            # Single line tick update (overwrite previous line)
+            # Log handling for GitHub Actions vs Local
             if market_data['vwap'] and market_data['rsi']:
                 positions_str = f"Pos:{len(self.active_positions)}" if self.active_positions else "NoPos"
                 trend_str = "↑" if market_data['supertrend']['is_uptrend'] else "↓"
@@ -318,18 +336,28 @@ class OptionsTrader:
                 
                 pnl_str = f"P&L:₹{total_pnl:+,.0f}" if self.active_positions else ""
                 
-                # Create the log line
-                log_line = (f"\r[{datetime.now().strftime('%H:%M:%S')}] "
-                          f"Spot:{price:.0f} VWAP:{market_data['vwap']:.0f} "
-                          f"RSI:{market_data['rsi']:.1f} {trend_str} "
-                          f"Vol:{market_data['volatility']*100:.1f}% "
-                          f"{positions_str} {pnl_str}")
-                
-                # Clear previous line and print new one
-                sys.stdout.write('\r' + ' ' * self.last_log_line_length + '\r')
-                sys.stdout.write(log_line)
-                sys.stdout.flush()
-                self.last_log_line_length = len(log_line)
+                if IS_GITHUB_ACTIONS:
+                    # In GitHub Actions, log every 10 seconds
+                    if gh_logger.should_log_tick():
+                        log_message = (f"[{datetime.now().strftime('%H:%M:%S')}] "
+                                     f"Spot:{price:.0f} VWAP:{market_data['vwap']:.0f} "
+                                     f"RSI:{market_data['rsi']:.1f} {trend_str} "
+                                     f"Vol:{market_data['volatility']*100:.1f}% "
+                                     f"{positions_str} {pnl_str}")
+                        print(log_message)
+                        logging.info(log_message)
+                else:
+                    # Local environment - single line update
+                    log_line = (f"\r[{datetime.now().strftime('%H:%M:%S')}] "
+                              f"Spot:{price:.0f} VWAP:{market_data['vwap']:.0f} "
+                              f"RSI:{market_data['rsi']:.1f} {trend_str} "
+                              f"Vol:{market_data['volatility']*100:.1f}% "
+                              f"{positions_str} {pnl_str}")
+                    
+                    sys.stdout.write('\r' + ' ' * self.last_log_line_length + '\r')
+                    sys.stdout.write(log_line)
+                    sys.stdout.flush()
+                    self.last_log_line_length = len(log_line)
             
             self._manage_positions(market_data)
             
@@ -339,7 +367,9 @@ class OptionsTrader:
                     self._execute_signal(signal, market_data)
                     
         except Exception as e:
-            print(f"\nError processing tick: {e}")
+            error_msg = f"Error processing tick: {e}"
+            print(f"\n{error_msg}")
+            logging.error(error_msg)
             
     def _validate_tick(self, tick_data):
         price = float(tick_data.get("last_price", tick_data.get("ltp", 0)))
@@ -420,33 +450,43 @@ class OptionsTrader:
                 'signal_strength': signal['strength']
             }
             
-            # Detailed log for new trade (with newlines to separate from tick updates)
-            print(f"\n\n{'='*60}")
-            print(f"🔔 NEW TRADE SIGNAL - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"{'='*60}")
-            print(f"Direction    : {'CALL' if option_type == 'CE' else 'PUT'} Option")
-            print(f"Strike       : {strike}")
-            print(f"Spot Price   : ₹{spot_price:.2f}")
-            print(f"Premium      : ₹{premium:.2f}")
-            print(f"Quantity     : {position_size} ({position_size//75} lots)")
-            print(f"{'─'*60}")
-            print(f"Target       : ₹{stops_targets['target']:.2f} (+{((stops_targets['target']/premium-1)*100):.1f}%)")
-            print(f"Stop Loss    : ₹{stops_targets['stop_loss']:.2f} ({((stops_targets['stop_loss']/premium-1)*100):.1f}%)")
-            print(f"Risk/Reward  : 1:{stops_targets['risk_reward']:.1f}")
-            print(f"{'─'*60}")
-            print(f"Delta        : {delta:.3f}")
-            print(f"Gamma        : {gamma:.4f}")
-            print(f"Theta        : ₹{theta:.2f}/day")
-            print(f"IV           : {iv*100:.1f}%")
-            print(f"Signal Score : {signal['strength']:.0f}/100")
-            print(f"{'='*60}\n")
+            # Detailed log for new trade - same format for both environments
+            trade_log = f"""
+{'='*60}
+🔔 NEW TRADE SIGNAL - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+{'='*60}
+Direction    : {'CALL' if option_type == 'CE' else 'PUT'} Option
+Strike       : {strike}
+Spot Price   : ₹{spot_price:.2f}
+Premium      : ₹{premium:.2f}
+Quantity     : {position_size} ({position_size//75} lots)
+{'-'*60}
+Target       : ₹{stops_targets['target']:.2f} (+{((stops_targets['target']/premium-1)*100):.1f}%)
+Stop Loss    : ₹{stops_targets['stop_loss']:.2f} ({((stops_targets['stop_loss']/premium-1)*100):.1f}%)
+Risk/Reward  : 1:{stops_targets['risk_reward']:.1f}
+{'-'*60}
+Delta        : {delta:.3f}
+Gamma        : {gamma:.4f}
+Theta        : ₹{theta:.2f}/day
+IV           : {iv*100:.1f}%
+Signal Score : {signal['strength']:.0f}/100
+{'='*60}
+"""
+            print(trade_log)
+            logging.info(trade_log)
+            
+            # GitHub Actions annotation
+            if IS_GITHUB_ACTIONS:
+                print(f"::notice title=New Trade Opened::{'CALL' if option_type == 'CE' else 'PUT'} {strike} @ ₹{premium:.2f}")
             
             position_id = f"{option_type}_{strike}_{int(time.time())}"
             self.active_positions[position_id] = position
             self.signals_today += 1
             
         except Exception as e:
-            print(f"\nError executing signal: {e}")
+            error_msg = f"Error executing signal: {e}"
+            print(f"\n{error_msg}")
+            logging.error(error_msg)
     
     def _manage_positions(self, market_data):
         for position_id, position in list(self.active_positions.items()):
@@ -479,25 +519,37 @@ class OptionsTrader:
                     self._close_position(position_id, current_premium, "TIME_EXIT")
                     
             except Exception as e:
-                print(f"\nError managing position: {e}")
+                error_msg = f"Error managing position: {e}"
+                print(f"\n{error_msg}")
+                logging.error(error_msg)
     
     def _close_position(self, position_id, exit_price, reason):
         position = self.active_positions[position_id]
         pnl = (exit_price - position['premium']) * position['quantity']
         pnl_pct = ((exit_price / position['premium']) - 1) * 100
         
-        # Clear the current line and print closing details
-        sys.stdout.write('\r' + ' ' * self.last_log_line_length + '\r')
+        # Clear the current line if not in GitHub Actions
+        if not IS_GITHUB_ACTIONS:
+            sys.stdout.write('\r' + ' ' * self.last_log_line_length + '\r')
         
-        print(f"\n{'─'*60}")
-        print(f"📊 POSITION CLOSED - {reason}")
-        print(f"{'─'*60}")
-        print(f"Type         : {position['type']} {position['strike']}")
-        print(f"Entry        : ₹{position['premium']:.2f}")
-        print(f"Exit         : ₹{exit_price:.2f}")
-        print(f"P&L          : ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)")
-        print(f"Duration     : {(datetime.now() - position['entry_time']).total_seconds()/60:.0f} mins")
-        print(f"{'─'*60}\n")
+        close_log = f"""
+{'-'*60}
+📊 POSITION CLOSED - {reason}
+{'-'*60}
+Type         : {position['type']} {position['strike']}
+Entry        : ₹{position['premium']:.2f}
+Exit         : ₹{exit_price:.2f}
+P&L          : ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)
+Duration     : {(datetime.now() - position['entry_time']).total_seconds()/60:.0f} mins
+{'-'*60}
+"""
+        print(close_log)
+        logging.info(close_log)
+        
+        # GitHub Actions annotation
+        if IS_GITHUB_ACTIONS:
+            status = "✅ Profit" if pnl > 0 else "❌ Loss"
+            print(f"::notice title=Position Closed::{status} ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)")
         
         self.risk_manager.daily_pnl += pnl
         del self.active_positions[position_id]
@@ -596,15 +648,21 @@ class StreamManager:
                                 }
                                 self.trader.process_tick(tick_data)
                 except Exception as e:
-                    print(f"\nError processing message: {e}")
+                    error_msg = f"Error processing message: {e}"
+                    print(f"\n{error_msg}")
+                    logging.error(error_msg)
             
             def on_error(error):
-                print(f"\nWebSocket error: {error}")
+                error_msg = f"WebSocket error: {error}"
+                print(f"\n{error_msg}")
+                logging.error(error_msg)
                 self.is_connected = False
                 self._reconnect()
             
             def on_close():
-                print("\nWebSocket connection closed")
+                msg = "WebSocket connection closed"
+                print(f"\n{msg}")
+                logging.info(msg)
                 self.is_connected = False
                 self._reconnect()
             
@@ -624,14 +682,18 @@ class StreamManager:
             self.reconnect_delay = 5
             
         except Exception as e:
-            print(f"Connection failed: {e}")
+            error_msg = f"Connection failed: {e}"
+            print(error_msg)
+            logging.error(error_msg)
             self._reconnect()
     
     def _reconnect(self):
         if self.is_connected:
             return
             
-        print(f"\nReconnecting in {self.reconnect_delay} seconds...")
+        msg = f"Reconnecting in {self.reconnect_delay} seconds..."
+        print(f"\n{msg}")
+        logging.info(msg)
         time.sleep(self.reconnect_delay)
         self.reconnect_delay = min(self.reconnect_delay * 2, 300)
         self.connect()
@@ -641,13 +703,19 @@ class StreamManager:
         nse_status = market_status.get('NSE_INDEX', 'UNKNOWN')
         
         if nse_status in ['NORMAL_OPEN', 'PRE_OPEN']:
-            print("\n[MARKET OPEN] Trading Active")
+            msg = "[MARKET OPEN] Trading Active"
+            print(f"\n{msg}")
+            logging.info(msg)
         elif nse_status in ['CLOSING_END', 'NORMAL_CLOSE']:
-            print("\n[MARKET CLOSED]")
+            msg = "[MARKET CLOSED]"
+            print(f"\n{msg}")
+            logging.info(msg)
             for position_id in list(self.trader.active_positions.keys()):
                 self.trader._close_position(position_id, 0, "MARKET_CLOSE")
         else:
-            print(f"\n[MARKET STATUS] {nse_status}")
+            msg = f"[MARKET STATUS] {nse_status}"
+            print(f"\n{msg}")
+            logging.info(msg)
 
 def validate_token():
     """Check if token is valid by attempting a simple API call"""
@@ -668,18 +736,25 @@ def main():
         # Create logs directory if it doesn't exist
         os.makedirs("logs", exist_ok=True)
         
-        # Setup file logging only (no console logging for cleaner output)
+        # Setup logging
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(message)s',
             handlers=[
-                logging.FileHandler(f"logs/trading_{datetime.now().strftime('%Y%m%d')}.log")
+                logging.FileHandler(f"logs/trading_{datetime.now().strftime('%Y%m%d')}.log"),
+                logging.StreamHandler() if not IS_GITHUB_ACTIONS else logging.NullHandler()
             ]
         )
         
         print("\n" + "="*60)
         print("NIFTY OPTIONS SCALPING SYSTEM")
+        if IS_GITHUB_ACTIONS:
+            print("Running in GitHub Actions Environment")
         print("="*60)
+        
+        # GitHub Actions summary
+        if IS_GITHUB_ACTIONS:
+            print("::group::System Configuration")
         
         # Validate token
         if not validate_token():
@@ -704,6 +779,10 @@ def main():
         print(f"├─ RSI Period : {RSI_PERIOD}")
         print(f"└─ Delta Threshold : {DELTA_THRESHOLD}")
         
+        if IS_GITHUB_ACTIONS:
+            print("::endgroup::")
+            print("\n::group::Live Trading Log")
+        
         print("\n" + "-"*60)
         print("Starting live data feed...\n")
         
@@ -712,15 +791,43 @@ def main():
         
         # Run for market hours or until interrupted
         end_time = datetime.now().replace(hour=15, minute=30, second=0)
+        session_start = datetime.now()
+        
         while datetime.now() < end_time:
             time.sleep(1)
             
-        print("\n\nMarket closed. Shutting down...")
+            # Periodic status update for GitHub Actions
+            if IS_GITHUB_ACTIONS and (datetime.now() - session_start).total_seconds() % 300 == 0:
+                elapsed = (datetime.now() - session_start).total_seconds() / 60
+                print(f"\n[STATUS] Session running for {elapsed:.0f} minutes")
+                print(f"[STATUS] Active positions: {len(trader.active_positions)}")
+                print(f"[STATUS] Daily P&L: ₹{trader.risk_manager.daily_pnl:+,.0f}\n")
+        
+        if IS_GITHUB_ACTIONS:
+            print("::endgroup::")
+        
+        # Final summary
+        print("\n\n" + "="*60)
+        print("TRADING SESSION SUMMARY")
+        print("="*60)
+        print(f"Total Signals Generated : {trader.signals_today}")
+        print(f"Final Daily P&L         : ₹{trader.risk_manager.daily_pnl:+,.0f}")
+        print(f"Session Duration        : {(datetime.now() - session_start).total_seconds()/60:.0f} minutes")
+        print("="*60)
+        
+        if IS_GITHUB_ACTIONS:
+            # Set output for GitHub Actions
+            print(f"::set-output name=daily_pnl::{trader.risk_manager.daily_pnl}")
+            print(f"::set-output name=total_signals::{trader.signals_today}")
             
     except KeyboardInterrupt:
         print("\n\nShutting down trading system...")
     except Exception as e:
-        print(f"\n\nFatal error: {e}")
+        error_msg = f"Fatal error: {e}"
+        print(f"\n\n{error_msg}")
+        logging.error(error_msg)
+        if IS_GITHUB_ACTIONS:
+            print(f"::error::{error_msg}")
         sys.exit(1)
 
 if __name__ == "__main__":

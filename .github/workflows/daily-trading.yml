@@ -32,10 +32,40 @@ jobs:
         run: |
           mkdir -p logs
       
-      - name: Run trading
+      - name: Run trading bot
+        id: trading
         run: |
-          python main.py
+          python nifty_options_github_actions.py
         timeout-minutes: 390  # 6.5 hours (market hours)
+        env:
+          GITHUB_ACTIONS: 'true'  # Ensures proper logging for CI
+      
+      - name: Generate trading report
+        if: always()
+        run: |
+          echo "## 📊 Trading Session Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date**: $(date +'%Y-%m-%d')" >> $GITHUB_STEP_SUMMARY
+          echo "**Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Extract summary from logs
+          if [ -f logs/trading_*.log ]; then
+            echo "### Session Summary" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -20 logs/trading_*.log | grep -E "(TRADING SESSION SUMMARY|Total Signals|Daily P&L|Duration)" || echo "No summary found"
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            
+            echo "### Trade Entries" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 15 "NEW TRADE SIGNAL" logs/trading_*.log | tail -45 || echo "No trades executed"
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            
+            echo "### Position Closures" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 7 "POSITION CLOSED" logs/trading_*.log | tail -40 || echo "No positions closed"
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
       
       - name: Upload logs
         if: always()
@@ -45,13 +75,36 @@ jobs:
           path: logs/
           retention-days: 30
       
-      - name: Display final status
+      - name: Upload trading report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trading-report-${{ github.run_number }}
+          path: |
+            logs/trading_*.log
+            ${{ github.workspace }}/job_summary.md
+          retention-days: 90
+      
+      - name: Send notification (Optional)
+        if: always()
+        continue-on-error: true
+        run: |
+          # Extract P&L from logs
+          if [ -f logs/trading_*.log ]; then
+            PNL=$(grep "Final Daily P&L" logs/trading_*.log | tail -1 | grep -oE "[+-]?[0-9,]+")
+            SIGNALS=$(grep "Total Signals Generated" logs/trading_*.log | tail -1 | grep -oE "[0-9]+")
+            
+            echo "Daily P&L: ₹${PNL:-0}"
+            echo "Total Signals: ${SIGNALS:-0}"
+            
+            # Add webhook notification here if needed
+            # Example: Discord, Slack, Telegram webhook
+            # curl -X POST "YOUR_WEBHOOK_URL" \
+            #   -H "Content-Type: application/json" \
+            #   -d "{\"content\":\"Trading Session Complete\\nP&L: ₹${PNL}\\nSignals: ${SIGNALS}\"}"
+          fi
+      
+      - name: Clean up sensitive data
         if: always()
         run: |
-          echo "Trading session completed"
-          if [ -f logs/trading_*.log ]; then
-            echo "Log file found - displaying last 50 lines:"
-            tail -50 logs/trading_*.log
-          else
-            echo "No log file found"
-          fi
+          rm -f token.txt
