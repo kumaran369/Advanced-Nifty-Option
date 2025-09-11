@@ -35,10 +35,11 @@ jobs:
       - name: Run trading bot
         id: trading
         run: |
-          python main.py
+          python -u main.py
         timeout-minutes: 390  # 6.5 hours (market hours)
         env:
           GITHUB_ACTIONS: 'true'  # Ensures proper logging for CI
+          PYTHONUNBUFFERED: '1'  # Force unbuffered output
       
       - name: Generate trading report
         if: always()

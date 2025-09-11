@@ -1,3 +1,4 @@
+#!/usr/bin/env python3 -u
 """
 Nifty Option 1-lot Scalping Signal Generator - GITHUB ACTIONS VERSION
 Optimized for GitHub Actions with proper logging
@@ -17,9 +18,18 @@ from math import log, sqrt, exp
 from scipy.stats import norm
 from typing import Dict, Optional, Tuple
 
+# Force unbuffered output for GitHub Actions
+if os.environ.get('GITHUB_ACTIONS', 'false') == 'true':
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+
 # -------- SETTINGS ----------
 # Detect if running in GitHub Actions
 IS_GITHUB_ACTIONS = os.environ.get('GITHUB_ACTIONS', 'false') == 'true'
+
+# Immediate startup message
+print(f"[STARTUP] Script started at {datetime.now()}", flush=True)
 
 # Read token from file
 def get_token():
@@ -344,7 +354,7 @@ class OptionsTrader:
                                      f"RSI:{market_data['rsi']:.1f} {trend_str} "
                                      f"Vol:{market_data['volatility']*100:.1f}% "
                                      f"{positions_str} {pnl_str}")
-                        print(log_message)
+                        print(log_message, flush=True)
                         logging.info(log_message)
                 else:
                     # Local environment - single line update
@@ -368,7 +378,7 @@ class OptionsTrader:
                     
         except Exception as e:
             error_msg = f"Error processing tick: {e}"
-            print(f"\n{error_msg}")
+            print(f"\n{error_msg}", flush=True)
             logging.error(error_msg)
             
     def _validate_tick(self, tick_data):
@@ -472,12 +482,12 @@ IV           : {iv*100:.1f}%
 Signal Score : {signal['strength']:.0f}/100
 {'='*60}
 """
-            print(trade_log)
+            print(trade_log, flush=True)
             logging.info(trade_log)
             
             # GitHub Actions annotation
             if IS_GITHUB_ACTIONS:
-                print(f"::notice title=New Trade Opened::{'CALL' if option_type == 'CE' else 'PUT'} {strike} @ ₹{premium:.2f}")
+                print(f"::notice title=New Trade Opened::{'CALL' if option_type == 'CE' else 'PUT'} {strike} @ ₹{premium:.2f}", flush=True)
             
             position_id = f"{option_type}_{strike}_{int(time.time())}"
             self.active_positions[position_id] = position
@@ -543,13 +553,13 @@ P&L          : ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)
 Duration     : {(datetime.now() - position['entry_time']).total_seconds()/60:.0f} mins
 {'-'*60}
 """
-        print(close_log)
+        print(close_log, flush=True)
         logging.info(close_log)
         
         # GitHub Actions annotation
         if IS_GITHUB_ACTIONS:
             status = "✅ Profit" if pnl > 0 else "❌ Loss"
-            print(f"::notice title=Position Closed::{status} ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)")
+            print(f"::notice title=Position Closed::{status} ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)", flush=True)
         
         self.risk_manager.daily_pnl += pnl
         del self.active_positions[position_id]
@@ -649,19 +659,19 @@ class StreamManager:
                                 self.trader.process_tick(tick_data)
                 except Exception as e:
                     error_msg = f"Error processing message: {e}"
-                    print(f"\n{error_msg}")
+                    print(f"\n{error_msg}", flush=True)
                     logging.error(error_msg)
             
             def on_error(error):
                 error_msg = f"WebSocket error: {error}"
-                print(f"\n{error_msg}")
+                print(f"\n{error_msg}", flush=True)
                 logging.error(error_msg)
                 self.is_connected = False
                 self._reconnect()
             
             def on_close():
                 msg = "WebSocket connection closed"
-                print(f"\n{msg}")
+                print(f"\n{msg}", flush=True)
                 logging.info(msg)
                 self.is_connected = False
                 self._reconnect()
@@ -676,14 +686,14 @@ class StreamManager:
             self.streamer.on("error", on_error)
             self.streamer.on("close", on_close)
             
-            print("Connecting to market data stream...")
+            print("Connecting to market data stream...", flush=True)
             self.streamer.connect()
             self.is_connected = True
             self.reconnect_delay = 5
             
         except Exception as e:
             error_msg = f"Connection failed: {e}"
-            print(error_msg)
+            print(error_msg, flush=True)
             logging.error(error_msg)
             self._reconnect()
     
@@ -692,7 +702,7 @@ class StreamManager:
             return
             
         msg = f"Reconnecting in {self.reconnect_delay} seconds..."
-        print(f"\n{msg}")
+        print(f"\n{msg}", flush=True)
         logging.info(msg)
         time.sleep(self.reconnect_delay)
         self.reconnect_delay = min(self.reconnect_delay * 2, 300)
@@ -704,31 +714,31 @@ class StreamManager:
         
         if nse_status in ['NORMAL_OPEN', 'PRE_OPEN']:
             msg = "[MARKET OPEN] Trading Active"
-            print(f"\n{msg}")
+            print(f"\n{msg}", flush=True)
             logging.info(msg)
         elif nse_status in ['CLOSING_END', 'NORMAL_CLOSE']:
             msg = "[MARKET CLOSED]"
-            print(f"\n{msg}")
+            print(f"\n{msg}", flush=True)
             logging.info(msg)
             for position_id in list(self.trader.active_positions.keys()):
                 self.trader._close_position(position_id, 0, "MARKET_CLOSE")
         else:
             msg = f"[MARKET STATUS] {nse_status}"
-            print(f"\n{msg}")
+            print(f"\n{msg}", flush=True)
             logging.info(msg)
 
 def validate_token():
     """Check if token is valid by attempting a simple API call"""
     if not ACCESS_TOKEN or ACCESS_TOKEN == "":
-        print("No access token found in token.txt")
+        print("No access token found in token.txt", flush=True)
         return False
     
     # Basic token validation
     if len(ACCESS_TOKEN) < 100:
-        print("Invalid token format")
+        print("Invalid token format", flush=True)
         return False
     
-    print("Token loaded successfully")
+    print("Token loaded successfully", flush=True)
     return True
 
 def main():
@@ -746,15 +756,15 @@ def main():
             ]
         )
         
-        print("\n" + "="*60)
-        print("NIFTY OPTIONS SCALPING SYSTEM")
+        print("\n" + "="*60, flush=True)
+        print("NIFTY OPTIONS SCALPING SYSTEM", flush=True)
         if IS_GITHUB_ACTIONS:
-            print("Running in GitHub Actions Environment")
-        print("="*60)
+            print("Running in GitHub Actions Environment", flush=True)
+        print("="*60, flush=True)
         
         # GitHub Actions summary
         if IS_GITHUB_ACTIONS:
-            print("::group::System Configuration")
+            print("::group::System Configuration", flush=True)
         
         # Validate token
         if not validate_token():
@@ -762,29 +772,29 @@ def main():
         
         # Check market hours
         now = datetime.now()
-        print(f"Current Time : {now.strftime('%H:%M:%S')}")
-        print(f"Market Hours : 09:15 - 15:30")
+        print(f"Current Time : {now.strftime('%H:%M:%S')}", flush=True)
+        print(f"Market Hours : 09:15 - 15:30", flush=True)
         
         if now.hour < 9 or now.hour >= 16:
-            print("⚠️  Outside market hours")
+            print("⚠️  Outside market hours", flush=True)
         
         # Initialize trader
         trader = OptionsTrader()
         stream_manager = StreamManager(trader)
         
         # Display configuration
-        print(f"\nConfiguration:")
-        print(f"├─ Risk per trade : {MAX_RISK_PER_TRADE*100}%")
-        print(f"├─ Max daily signals : {MAX_SIGNALS_PER_DAY}")
-        print(f"├─ RSI Period : {RSI_PERIOD}")
-        print(f"└─ Delta Threshold : {DELTA_THRESHOLD}")
+        print(f"\nConfiguration:", flush=True)
+        print(f"├─ Risk per trade : {MAX_RISK_PER_TRADE*100}%", flush=True)
+        print(f"├─ Max daily signals : {MAX_SIGNALS_PER_DAY}", flush=True)
+        print(f"├─ RSI Period : {RSI_PERIOD}", flush=True)
+        print(f"└─ Delta Threshold : {DELTA_THRESHOLD}", flush=True)
         
         if IS_GITHUB_ACTIONS:
-            print("::endgroup::")
-            print("\n::group::Live Trading Log")
+            print("::endgroup::", flush=True)
+            print("\n::group::Live Trading Log", flush=True)
         
-        print("\n" + "-"*60)
-        print("Starting live data feed...\n")
+        print("\n" + "-"*60, flush=True)
+        print("Starting live data feed...\n", flush=True)
         
         # Connect to market
         stream_manager.connect()
@@ -793,41 +803,49 @@ def main():
         end_time = datetime.now().replace(hour=15, minute=30, second=0)
         session_start = datetime.now()
         
+        # Add heartbeat for GitHub Actions
+        last_heartbeat = time.time()
+        
         while datetime.now() < end_time:
             time.sleep(1)
+            
+            # Heartbeat every 30 seconds for GitHub Actions
+            if IS_GITHUB_ACTIONS and time.time() - last_heartbeat > 30:
+                print(f"[HEARTBEAT] {datetime.now().strftime('%H:%M:%S')} - System running...", flush=True)
+                last_heartbeat = time.time()
             
             # Periodic status update for GitHub Actions
             if IS_GITHUB_ACTIONS and (datetime.now() - session_start).total_seconds() % 300 == 0:
                 elapsed = (datetime.now() - session_start).total_seconds() / 60
-                print(f"\n[STATUS] Session running for {elapsed:.0f} minutes")
-                print(f"[STATUS] Active positions: {len(trader.active_positions)}")
-                print(f"[STATUS] Daily P&L: ₹{trader.risk_manager.daily_pnl:+,.0f}\n")
+                print(f"\n[STATUS] Session running for {elapsed:.0f} minutes", flush=True)
+                print(f"[STATUS] Active positions: {len(trader.active_positions)}", flush=True)
+                print(f"[STATUS] Daily P&L: ₹{trader.risk_manager.daily_pnl:+,.0f}\n", flush=True)
         
         if IS_GITHUB_ACTIONS:
-            print("::endgroup::")
+            print("::endgroup::", flush=True)
         
         # Final summary
-        print("\n\n" + "="*60)
-        print("TRADING SESSION SUMMARY")
-        print("="*60)
-        print(f"Total Signals Generated : {trader.signals_today}")
-        print(f"Final Daily P&L         : ₹{trader.risk_manager.daily_pnl:+,.0f}")
-        print(f"Session Duration        : {(datetime.now() - session_start).total_seconds()/60:.0f} minutes")
-        print("="*60)
+        print("\n\n" + "="*60, flush=True)
+        print("TRADING SESSION SUMMARY", flush=True)
+        print("="*60, flush=True)
+        print(f"Total Signals Generated : {trader.signals_today}", flush=True)
+        print(f"Final Daily P&L         : ₹{trader.risk_manager.daily_pnl:+,.0f}", flush=True)
+        print(f"Session Duration        : {(datetime.now() - session_start).total_seconds()/60:.0f} minutes", flush=True)
+        print("="*60, flush=True)
         
         if IS_GITHUB_ACTIONS:
             # Set output for GitHub Actions
-            print(f"::set-output name=daily_pnl::{trader.risk_manager.daily_pnl}")
-            print(f"::set-output name=total_signals::{trader.signals_today}")
+            print(f"::set-output name=daily_pnl::{trader.risk_manager.daily_pnl}", flush=True)
+            print(f"::set-output name=total_signals::{trader.signals_today}", flush=True)
             
     except KeyboardInterrupt:
-        print("\n\nShutting down trading system...")
+        print("\n\nShutting down trading system...", flush=True)
     except Exception as e:
         error_msg = f"Fatal error: {e}"
-        print(f"\n\n{error_msg}")
+        print(f"\n\n{error_msg}", flush=True)
         logging.error(error_msg)
         if IS_GITHUB_ACTIONS:
-            print(f"::error::{error_msg}")
+            print(f"::error::{error_msg}", flush=True)
         sys.exit(1)
 
 if __name__ == "__main__":
