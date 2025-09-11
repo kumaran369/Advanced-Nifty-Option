@@ -1,6 +1,6 @@
 """
-Nifty Option 1-lot Scalping Signal Generator - SIMPLIFIED VERSION
-For GitHub Actions automated trading
+Nifty Option 1-lot Scalping Signal Generator - CLEAN LOGGING VERSION
+Detailed logs for trade entries only, single-line tick updates
 """
 
 import time
@@ -50,7 +50,6 @@ TIME_BASED_EXIT_HOURS = 2
 MARKET_OPEN = datetime.now().replace(hour=9, minute=15, second=0, microsecond=0)
 MARKET_CLOSE = datetime.now().replace(hour=15, minute=30, second=0, microsecond=0)
 
-# Copy all the classes from your original file
 class BlackScholesCalculator:
     """Proper options pricing using Black-Scholes model"""
     
@@ -278,6 +277,8 @@ class OptionsTrader:
         self.tick_buffer = deque(maxlen=5000)
         self.last_processed_time = 0
         self.signals_today = 0
+        self.tick_count = 0
+        self.last_log_line_length = 0
         
     def process_tick(self, tick_data):
         try:
@@ -293,12 +294,42 @@ class OptionsTrader:
             
             self.last_processed_time = timestamp
             self.tick_buffer.append((timestamp, price, volume))
+            self.tick_count += 1
             
             market_data = self._update_market_data(price, volume, timestamp)
             
-            # Simple console output
+            # Single line tick update (overwrite previous line)
             if market_data['vwap'] and market_data['rsi']:
-                print(f"Price: {price:.2f} | VWAP: {market_data['vwap']:.2f} | RSI: {market_data['rsi']:.2f}")
+                positions_str = f"Pos:{len(self.active_positions)}" if self.active_positions else "NoPos"
+                trend_str = "↑" if market_data['supertrend']['is_uptrend'] else "↓"
+                
+                # Calculate P&L for active positions
+                total_pnl = 0
+                for pos_id, pos in self.active_positions.items():
+                    time_to_expiry = ((pos['expiry'] - datetime.now()).total_seconds() / 
+                                     (365 * 24 * 3600))
+                    if time_to_expiry > 0:
+                        current_premium = self.bs_calculator.calculate_option_price(
+                            market_data['price'], pos['strike'], time_to_expiry,
+                            RISK_FREE_RATE, market_data['volatility'], pos['type']
+                        )
+                        pnl = (current_premium - pos['premium']) * pos['quantity']
+                        total_pnl += pnl
+                
+                pnl_str = f"P&L:₹{total_pnl:+,.0f}" if self.active_positions else ""
+                
+                # Create the log line
+                log_line = (f"\r[{datetime.now().strftime('%H:%M:%S')}] "
+                          f"Spot:{price:.0f} VWAP:{market_data['vwap']:.0f} "
+                          f"RSI:{market_data['rsi']:.1f} {trend_str} "
+                          f"Vol:{market_data['volatility']*100:.1f}% "
+                          f"{positions_str} {pnl_str}")
+                
+                # Clear previous line and print new one
+                sys.stdout.write('\r' + ' ' * self.last_log_line_length + '\r')
+                sys.stdout.write(log_line)
+                sys.stdout.flush()
+                self.last_log_line_length = len(log_line)
             
             self._manage_positions(market_data)
             
@@ -308,7 +339,7 @@ class OptionsTrader:
                     self._execute_signal(signal, market_data)
                     
         except Exception as e:
-            logging.error(f"Error processing tick: {e}")
+            print(f"\nError processing tick: {e}")
             
     def _validate_tick(self, tick_data):
         price = float(tick_data.get("last_price", tick_data.get("ltp", 0)))
@@ -352,7 +383,6 @@ class OptionsTrader:
             )
             
             if abs(delta) < DELTA_THRESHOLD:
-                logging.info(f"Signal rejected: Delta {delta:.3f} below threshold")
                 return
             
             gamma = self.bs_calculator.calculate_gamma(
@@ -390,24 +420,33 @@ class OptionsTrader:
                 'signal_strength': signal['strength']
             }
             
-            # Log signal
-            logging.info(f"""
-========== NEW SIGNAL ==========
-Type: {position['type']} (Strike: {position['strike']})
-Spot: Rs.{position['spot_entry']:.2f}
-Premium: Rs.{position['premium']:.2f}
-Qty: {position['quantity']} ({position['quantity']//75} lots)
-Target: Rs.{position['target']:.2f} | SL: Rs.{position['stop_loss']:.2f}
-Delta: {position['delta']:.3f} | IV: {position['iv']*100:.1f}%
-================================
-            """)
+            # Detailed log for new trade (with newlines to separate from tick updates)
+            print(f"\n\n{'='*60}")
+            print(f"🔔 NEW TRADE SIGNAL - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"{'='*60}")
+            print(f"Direction    : {'CALL' if option_type == 'CE' else 'PUT'} Option")
+            print(f"Strike       : {strike}")
+            print(f"Spot Price   : ₹{spot_price:.2f}")
+            print(f"Premium      : ₹{premium:.2f}")
+            print(f"Quantity     : {position_size} ({position_size//75} lots)")
+            print(f"{'─'*60}")
+            print(f"Target       : ₹{stops_targets['target']:.2f} (+{((stops_targets['target']/premium-1)*100):.1f}%)")
+            print(f"Stop Loss    : ₹{stops_targets['stop_loss']:.2f} ({((stops_targets['stop_loss']/premium-1)*100):.1f}%)")
+            print(f"Risk/Reward  : 1:{stops_targets['risk_reward']:.1f}")
+            print(f"{'─'*60}")
+            print(f"Delta        : {delta:.3f}")
+            print(f"Gamma        : {gamma:.4f}")
+            print(f"Theta        : ₹{theta:.2f}/day")
+            print(f"IV           : {iv*100:.1f}%")
+            print(f"Signal Score : {signal['strength']:.0f}/100")
+            print(f"{'='*60}\n")
             
             position_id = f"{option_type}_{strike}_{int(time.time())}"
             self.active_positions[position_id] = position
             self.signals_today += 1
             
         except Exception as e:
-            logging.error(f"Error executing signal: {e}")
+            print(f"\nError executing signal: {e}")
     
     def _manage_positions(self, market_data):
         for position_id, position in list(self.active_positions.items()):
@@ -430,11 +469,8 @@ Delta: {position['delta']:.3f} | IV: {position['iv']*100:.1f}%
                 )
                 
                 pnl = (current_premium - position['premium']) * position['quantity']
-                pnl_pct = ((current_premium - position['premium']) / position['premium'] * 100)
                 
-                # Simple P&L display
-                print(f"{position['type']} {position['strike']} | P&L: Rs.{pnl:+,.0f} ({pnl_pct:+.1f}%)")
-                
+                # Check exit conditions
                 if current_premium <= position['stop_loss']:
                     self._close_position(position_id, current_premium, "STOP_LOSS")
                 elif current_premium >= position['target']:
@@ -443,18 +479,25 @@ Delta: {position['delta']:.3f} | IV: {position['iv']*100:.1f}%
                     self._close_position(position_id, current_premium, "TIME_EXIT")
                     
             except Exception as e:
-                logging.error(f"Error managing position: {e}")
+                print(f"\nError managing position: {e}")
     
     def _close_position(self, position_id, exit_price, reason):
         position = self.active_positions[position_id]
         pnl = (exit_price - position['premium']) * position['quantity']
+        pnl_pct = ((exit_price / position['premium']) - 1) * 100
         
-        logging.info(f"""
-POSITION CLOSED - {reason}
-Type: {position['type']} {position['strike']}
-Entry: Rs.{position['premium']:.2f} | Exit: Rs.{exit_price:.2f}
-P&L: Rs.{pnl:+,.0f}
-        """)
+        # Clear the current line and print closing details
+        sys.stdout.write('\r' + ' ' * self.last_log_line_length + '\r')
+        
+        print(f"\n{'─'*60}")
+        print(f"📊 POSITION CLOSED - {reason}")
+        print(f"{'─'*60}")
+        print(f"Type         : {position['type']} {position['strike']}")
+        print(f"Entry        : ₹{position['premium']:.2f}")
+        print(f"Exit         : ₹{exit_price:.2f}")
+        print(f"P&L          : ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)")
+        print(f"Duration     : {(datetime.now() - position['entry_time']).total_seconds()/60:.0f} mins")
+        print(f"{'─'*60}\n")
         
         self.risk_manager.daily_pnl += pnl
         del self.active_positions[position_id]
@@ -474,7 +517,7 @@ P&L: Rs.{pnl:+,.0f}
             return pd.DataFrame()
             
         df = pd.DataFrame(list(self.tick_buffer), columns=['ts', 'price', 'vol'])
-        df['minute'] = pd.to_datetime(df['ts'], unit='s').dt.floor('T')
+        df['minute'] = pd.to_datetime(df['ts'], unit='s').dt.floor('min')
         
         candles = df.groupby('minute').agg({
             'price': ['first', 'max', 'min', 'last'],
@@ -553,15 +596,15 @@ class StreamManager:
                                 }
                                 self.trader.process_tick(tick_data)
                 except Exception as e:
-                    logging.error(f"Error processing message: {e}")
+                    print(f"\nError processing message: {e}")
             
             def on_error(error):
-                logging.error(f"WebSocket error: {error}")
+                print(f"\nWebSocket error: {error}")
                 self.is_connected = False
                 self._reconnect()
             
             def on_close():
-                logging.info("WebSocket connection closed")
+                print("\nWebSocket connection closed")
                 self.is_connected = False
                 self._reconnect()
             
@@ -575,20 +618,20 @@ class StreamManager:
             self.streamer.on("error", on_error)
             self.streamer.on("close", on_close)
             
-            logging.info("Connecting to market data stream...")
+            print("Connecting to market data stream...")
             self.streamer.connect()
             self.is_connected = True
             self.reconnect_delay = 5
             
         except Exception as e:
-            logging.error(f"Connection failed: {e}")
+            print(f"Connection failed: {e}")
             self._reconnect()
     
     def _reconnect(self):
         if self.is_connected:
             return
             
-        logging.info(f"Reconnecting in {self.reconnect_delay} seconds...")
+        print(f"\nReconnecting in {self.reconnect_delay} seconds...")
         time.sleep(self.reconnect_delay)
         self.reconnect_delay = min(self.reconnect_delay * 2, 300)
         self.connect()
@@ -598,46 +641,45 @@ class StreamManager:
         nse_status = market_status.get('NSE_INDEX', 'UNKNOWN')
         
         if nse_status in ['NORMAL_OPEN', 'PRE_OPEN']:
-            logging.info("[MARKET OPEN] Trading Active")
+            print("\n[MARKET OPEN] Trading Active")
         elif nse_status in ['CLOSING_END', 'NORMAL_CLOSE']:
-            logging.info("[MARKET CLOSED]")
+            print("\n[MARKET CLOSED]")
             for position_id in list(self.trader.active_positions.keys()):
                 self.trader._close_position(position_id, 0, "MARKET_CLOSE")
         else:
-            logging.info(f"[MARKET STATUS] {nse_status}")
+            print(f"\n[MARKET STATUS] {nse_status}")
 
 def validate_token():
     """Check if token is valid by attempting a simple API call"""
     if not ACCESS_TOKEN or ACCESS_TOKEN == "":
-        logging.error("No access token found in token.txt")
+        print("No access token found in token.txt")
         return False
     
     # Basic token validation
     if len(ACCESS_TOKEN) < 100:
-        logging.error("Invalid token format")
+        print("Invalid token format")
         return False
     
-    logging.info("Token loaded successfully")
+    print("Token loaded successfully")
     return True
-
-def setup_logging():
-    """Setup logging configuration after creating logs directory"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f"logs/trading_{datetime.now().strftime('%Y%m%d')}.log"),
-            logging.StreamHandler()
-        ]
-    )
 
 def main():
     try:
         # Create logs directory if it doesn't exist
         os.makedirs("logs", exist_ok=True)
         
-        # Setup logging after directory creation
-        setup_logging()
+        # Setup file logging only (no console logging for cleaner output)
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(message)s',
+            handlers=[
+                logging.FileHandler(f"logs/trading_{datetime.now().strftime('%Y%m%d')}.log")
+            ]
+        )
+        
+        print("\n" + "="*60)
+        print("NIFTY OPTIONS SCALPING SYSTEM")
+        print("="*60)
         
         # Validate token
         if not validate_token():
@@ -645,17 +687,25 @@ def main():
         
         # Check market hours
         now = datetime.now()
+        print(f"Current Time : {now.strftime('%H:%M:%S')}")
+        print(f"Market Hours : 09:15 - 15:30")
+        
         if now.hour < 9 or now.hour >= 16:
-            logging.info("Outside market hours. Current time: " + now.strftime("%H:%M"))
-            
+            print("⚠️  Outside market hours")
+        
         # Initialize trader
         trader = OptionsTrader()
         stream_manager = StreamManager(trader)
         
-        # Start trading
-        logging.info("Starting Nifty Options Trading System...")
-        logging.info(f"Risk per trade: {MAX_RISK_PER_TRADE*100}%")
-        logging.info(f"Max daily signals: {MAX_SIGNALS_PER_DAY}")
+        # Display configuration
+        print(f"\nConfiguration:")
+        print(f"├─ Risk per trade : {MAX_RISK_PER_TRADE*100}%")
+        print(f"├─ Max daily signals : {MAX_SIGNALS_PER_DAY}")
+        print(f"├─ RSI Period : {RSI_PERIOD}")
+        print(f"└─ Delta Threshold : {DELTA_THRESHOLD}")
+        
+        print("\n" + "-"*60)
+        print("Starting live data feed...\n")
         
         # Connect to market
         stream_manager.connect()
@@ -665,12 +715,12 @@ def main():
         while datetime.now() < end_time:
             time.sleep(1)
             
-        logging.info("Market closed. Shutting down...")
+        print("\n\nMarket closed. Shutting down...")
             
     except KeyboardInterrupt:
-        logging.info("Shutting down trading system...")
+        print("\n\nShutting down trading system...")
     except Exception as e:
-        logging.error(f"Fatal error: {e}")
+        print(f"\n\nFatal error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
