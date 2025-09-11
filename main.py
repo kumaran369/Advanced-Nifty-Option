@@ -925,6 +925,12 @@ def main():
         if not validate_token():
             sys.exit(1)
         
+        # Check Discord webhook
+        if DISCORD_WEBHOOK_URL:
+            print("✅ Discord notifications enabled", flush=True)
+        else:
+            print("⚠️ Discord notifications disabled (no webhook URL)", flush=True)
+        
         # Check market hours
         now = datetime.now()
         print(f"Current Time : {now.strftime('%H:%M:%S')}", flush=True)

@@ -39,6 +39,14 @@ jobs:
         run: |
           mkdir -p logs
       
+      - name: Check Discord configuration
+        run: |
+          if [ -n "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
+            echo "✅ Discord webhook is configured"
+          else
+            echo "⚠️ Discord webhook not configured (optional)"
+          fi
+      
       - name: Run trading bot
         id: trading
         run: |
@@ -51,7 +59,7 @@ jobs:
           GITHUB_ACTIONS: 'true'  # Ensures proper logging for CI
           PYTHONUNBUFFERED: '1'  # Force unbuffered output
           TZ: 'Asia/Kolkata'  # Set timezone to IST
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}  # Discord webhook
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL || '' }}  # Discord webhook (optional)
       
       - name: Generate trading report
         if: always()
