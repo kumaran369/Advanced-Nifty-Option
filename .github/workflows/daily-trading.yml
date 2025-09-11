@@ -35,7 +35,7 @@ jobs:
       - name: Run trading bot
         id: trading
         run: |
-          python nifty_options_github_actions.py
+          python main.py
         timeout-minutes: 390  # 6.5 hours (market hours)
         env:
           GITHUB_ACTIONS: 'true'  # Ensures proper logging for CI
