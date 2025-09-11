@@ -29,7 +29,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install upstox-python-sdk numpy pandas scipy
+          pip install upstox-python-sdk numpy pandas scipy requests
       
       - name: Create token file
         run: |
@@ -51,6 +51,7 @@ jobs:
           GITHUB_ACTIONS: 'true'  # Ensures proper logging for CI
           PYTHONUNBUFFERED: '1'  # Force unbuffered output
           TZ: 'Asia/Kolkata'  # Set timezone to IST
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}  # Discord webhook
       
       - name: Generate trading report
         if: always()

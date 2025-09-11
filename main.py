@@ -17,6 +17,8 @@ import os
 from math import log, sqrt, exp
 from scipy.stats import norm
 from typing import Dict, Optional, Tuple
+import requests
+import json
 
 # Force unbuffered output for GitHub Actions
 if os.environ.get('GITHUB_ACTIONS', 'false') == 'true':
@@ -27,6 +29,9 @@ if os.environ.get('GITHUB_ACTIONS', 'false') == 'true':
 # -------- SETTINGS ----------
 # Detect if running in GitHub Actions
 IS_GITHUB_ACTIONS = os.environ.get('GITHUB_ACTIONS', 'false') == 'true'
+
+# Discord webhook URL
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', '')
 
 # Immediate startup message
 print(f"[STARTUP] Script started at {datetime.now()}", flush=True)
@@ -296,11 +301,154 @@ class RiskManager:
             'risk_reward': round((target - premium) / (premium - stop_loss), 2)
         }
 
+class DiscordNotifier:
+    """Send trade signals to Discord webhook"""
+    
+    def __init__(self, webhook_url):
+        self.webhook_url = webhook_url
+        self.enabled = bool(webhook_url)
+        
+    def send_trade_signal(self, position_data):
+        """Send trade entry signal to Discord"""
+        if not self.enabled:
+            return
+            
+        try:
+            # Create Discord embed
+            color = 0x00ff00 if position_data['type'] == 'CE' else 0xff0000
+            
+            embed = {
+                "title": f"🔔 NEW {position_data['type']} SIGNAL",
+                "color": color,
+                "timestamp": datetime.now().isoformat(),
+                "fields": [
+                    {
+                        "name": "📊 Strike",
+                        "value": f"{position_data['strike']}",
+                        "inline": True
+                    },
+                    {
+                        "name": "💰 Premium",
+                        "value": f"₹{position_data['premium']:.2f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "📈 Spot Price",
+                        "value": f"₹{position_data['spot_entry']:.2f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "🎯 Target",
+                        "value": f"₹{position_data['target']:.2f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "🛑 Stop Loss",
+                        "value": f"₹{position_data['stop_loss']:.2f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "📊 Quantity",
+                        "value": f"{position_data['quantity']} ({position_data['quantity']//75} lots)",
+                        "inline": True
+                    },
+                    {
+                        "name": "📉 Greeks",
+                        "value": f"Delta: {position_data['delta']:.3f} | Theta: ₹{position_data['theta']:.2f}/day",
+                        "inline": False
+                    },
+                    {
+                        "name": "📊 Risk/Reward",
+                        "value": f"1:{position_data['risk_reward']:.1f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "💪 Signal Strength",
+                        "value": f"{position_data['signal_strength']:.0f}/100",
+                        "inline": True
+                    }
+                ]
+            }
+            
+            # Prepare Discord message
+            content = {
+                "username": "Nifty Options Bot",
+                "avatar_url": "https://cdn-icons-png.flaticon.com/512/2920/2920349.png",
+                "content": f"**New Options Trade Alert!**\n{'CALL' if position_data['type'] == 'CE' else 'PUT'} {position_data['strike']} @ ₹{position_data['premium']:.2f}",
+                "embeds": [embed]
+            }
+            
+            # Send to Discord
+            response = requests.post(self.webhook_url, json=content)
+            if response.status_code == 204:
+                print("Discord notification sent successfully", flush=True)
+            else:
+                print(f"Discord notification failed: {response.status_code}", flush=True)
+                
+        except Exception as e:
+            print(f"Error sending Discord notification: {e}", flush=True)
+    
+    def send_position_closed(self, position_data, exit_price, reason, pnl):
+        """Send position closure notification to Discord"""
+        if not self.enabled:
+            return
+            
+        try:
+            # Determine color based on profit/loss
+            color = 0x00ff00 if pnl > 0 else 0xff0000
+            emoji = "✅" if pnl > 0 else "❌"
+            
+            embed = {
+                "title": f"{emoji} POSITION CLOSED - {reason}",
+                "color": color,
+                "timestamp": datetime.now().isoformat(),
+                "fields": [
+                    {
+                        "name": "📊 Type",
+                        "value": f"{position_data['type']} {position_data['strike']}",
+                        "inline": True
+                    },
+                    {
+                        "name": "💵 Entry",
+                        "value": f"₹{position_data['premium']:.2f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "💰 Exit",
+                        "value": f"₹{exit_price:.2f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "💸 P&L",
+                        "value": f"₹{pnl:+,.0f} ({((exit_price/position_data['premium'])-1)*100:+.1f}%)",
+                        "inline": True
+                    },
+                    {
+                        "name": "⏱️ Duration",
+                        "value": f"{(datetime.now() - position_data['entry_time']).total_seconds()/60:.0f} mins",
+                        "inline": True
+                    }
+                ]
+            }
+            
+            content = {
+                "username": "Nifty Options Bot",
+                "avatar_url": "https://cdn-icons-png.flaticon.com/512/2920/2920349.png",
+                "content": f"**Trade Closed: {emoji} ₹{pnl:+,.0f}**",
+                "embeds": [embed]
+            }
+            
+            requests.post(self.webhook_url, json=content)
+            
+        except Exception as e:
+            print(f"Error sending Discord close notification: {e}", flush=True)
+
 class OptionsTrader:
     def __init__(self):
         self.signal_generator = ImprovedSignalGenerator()
         self.risk_manager = RiskManager()
         self.bs_calculator = BlackScholesCalculator()
+        self.discord_notifier = DiscordNotifier(DISCORD_WEBHOOK_URL)
         self.active_positions = {}
         self.tick_buffer = deque(maxlen=5000)
         self.last_processed_time = 0
@@ -493,6 +641,9 @@ Signal Score : {signal['strength']:.0f}/100
             self.active_positions[position_id] = position
             self.signals_today += 1
             
+            # Send Discord notification
+            self.discord_notifier.send_trade_signal(position)
+            
         except Exception as e:
             error_msg = f"Error executing signal: {e}"
             print(f"\n{error_msg}")
@@ -562,6 +713,10 @@ Duration     : {(datetime.now() - position['entry_time']).total_seconds()/60:.0f
             print(f"::notice title=Position Closed::{status} ₹{pnl:+,.0f} ({pnl_pct:+.1f}%)", flush=True)
         
         self.risk_manager.daily_pnl += pnl
+        
+        # Send Discord notification
+        self.discord_notifier.send_position_closed(position, exit_price, reason, pnl)
+        
         del self.active_positions[position_id]
     
     def _get_atm_strike(self, spot_price, gap=50):
